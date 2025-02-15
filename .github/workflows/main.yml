@@ -1,51 +1,28 @@
-name: CI
-
-on:
+name: 刷课
+ 
+on: 
   push:
-
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            architecture: 'x86'
-            name: 'win32'
-
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v3
+    branches: [ main ]
+  #是否开始每天8点定时刷课，若要开启请把下面两行注释去掉
+  schedule:
+    - cron: "0 8 * * *" 
+    
+jobs: 
+  Start:
+    runs-on: ubuntu-latest # 在最新版本的 Ubuntu 操作系统环境下运行
+    steps: # 要执行的步骤
+      - name: 拷贝代码
+        uses: actions/checkout@v3  # 用于将github代码仓库的代码拷贝到工作目录中
+ 
+      - name: 设置python环境
+        uses: actions/setup-python@v2 # 用于设置 Python 环境，它允许你指定要在工作环境中使用的 Python 版本
         with:
-          python-version: '3.10'
-          architecture: ${{matrix.architecture}}
-
-      - name: Install requirements
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Build win bin
-        run: pyinstaller -F main.py -n  'chaoxing'
-
-      - name: run ls
-        run: |
-          ls dist
-          echo ${{github.ref}}
-
-      - name: Publish
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: 'dist/chaoxing*'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: 'dist/chaoxing*'
+          python-version: '3.9'  # 选择要用的Python版本
+ 
+      - name: 安装依赖包
+        run: | # 安装依赖包
+          pip install -r ./requirements.txt 
+          
+      
+      - name: Run main.py
+        run: python main.py -u 18727909697 -p 2635810067syq. -l 249016300,249016301 #课程id，默认为心理课的
