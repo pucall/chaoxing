@@ -1,11 +1,11 @@
 name: 刷课
  
-# on:
-#   push:
-#     branches: [ main ]
-#   #是否开始每天8点定时刷课，若要开启请把下面两行注释去掉
-#   schedule:
-#     - cron: "0 8 * * *" 
+ on:
+   push:
+     分支: [ main ]
+   #是否开始每天8点定时刷课，若要开启请把下面两行注释去掉
+   schedule:
+     - cron: "0 8 * * *" 
     
 jobs: 
   Start:
@@ -25,4 +25,4 @@ jobs:
           
       
       - name: Run main.py
-        run: python main.py -u 19011473320 -p 856923741xxt -l 245765139 #课程id，默认为心理课的
+        run: python main.py -u 19011473320 -p 856923741xxt -l 245765139,245588180 #课程id，默认为心理课的
