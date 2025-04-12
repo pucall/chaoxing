@@ -11,6 +11,7 @@ from urllib3 import disable_warnings, exceptions
 import time
 import sys
 import os
+from api.notification import Notification
 
 # # 定义全局变量, 用于存储配置文件路径
 # textPath = './resource/BookID.txt'
@@ -60,6 +61,11 @@ def init_config():
         action="store_true",
         help="启用调试模式, 输出DEBUG级别日志",
     )
+    parser.add_argument(
+        "-a", "--notopen-action", type=str, default="retry", 
+        choices=["retry", "ask", "continue"],
+        help="遇到关闭任务点时的行为: retry-重试, ask-询问, continue-继续"
+    )
 
     # 在解析之前捕获 -h 的行为
     if len(sys.argv) == 2 and sys.argv[1] in {"-h", "--help"}:
@@ -73,25 +79,44 @@ def init_config():
     if args.config:
         config = configparser.ConfigParser()
         config.read(args.config, encoding="utf8")
-        return (
-            config.get("common", "username"),
-            config.get("common", "password"),
-            (
-                str(config.get("common", "course_list")).split(",")
-                if config.get("common", "course_list")
-                else None
-            ),
-            int(config.get("common", "speed")),
-            config["tiku"],
-        )
+        common_config = {}
+        tiku_config = {}
+        notification_config = {}
+        # 检查并读取common节
+        if config.has_section("common"):
+            common_config = dict(config.items("common"))
+            # 处理course_list，将字符串转换为列表
+            if "course_list" in common_config and common_config["course_list"]:
+                common_config["course_list"] = common_config["course_list"].split(",")
+            # 处理speed，将字符串转换为浮点数
+            if "speed" in common_config:
+                common_config["speed"] = float(common_config["speed"])
+            # 处理notopen_action，设置默认值为retry
+            if "notopen_action" not in common_config:
+                common_config["notopen_action"] = "retry"
+        
+        # 检查并读取tiku节
+        if config.has_section("tiku"):
+            tiku_config = dict(config.items("tiku"))
+            # 处理delay，将字符串转换为整数
+            if "delay" in tiku_config:
+                tiku_config["delay"] = float(tiku_config["delay"])
+            # 处理delay，将字符串转换为小数
+            if "cover_rate" in tiku_config:
+                tiku_config["cover_rate"] = float(tiku_config["cover_rate"])
+
+        # 检查并读取notification节
+        if config.has_section("notification"):
+            notification_config = dict(config.items("notification"))
+        return common_config, tiku_config, notification_config
     else:
-        return (
-            args.username,
-            args.password,
-            args.list.split(",") if args.list else None,
-            int(args.speed) if args.speed else 1,
-            None,
-        )
+        build_params = {'common':{},"tiku":{},"notification":{}}
+        build_params['common']['username'] = args.username
+        build_params['common']['password'] = args.password
+        build_params['common']['course_list'] = args.list.split(",") if args.list else None
+        build_params['common']['speed'] = args.speed if args.speed else 1
+        build_params['common']['notopen_action'] = args.notopen_action if args.notopen_action else "retry"
+        return build_params['common'],build_params['tiku'],build_params['notification']
 
 
 class RollBackManager:
@@ -102,20 +127,30 @@ class RollBackManager:
     def add_times(self, id: str) -> None:
         if id == self.rollback_id and self.rollback_times == 3:
             raise MaxRollBackError("回滚次数已达3次, 请手动检查学习通任务点完成情况")
-        elif id != self.rollback_id:
-            # 新job
-            self.rollback_id = id
-            self.rollback_times = 1
+        # elif id != self.rollback_id:
+        #     # 新job
+        #     self.rollback_id = id
+        #     self.rollback_times = 1
         else:
             self.rollback_times += 1
 
+    def new_job(self, id: str) -> None:
+        if id != self.rollback_id:
+            self.rollback_id = id
+            self.rollback_times = 0
 
 if __name__ == "__main__":
     try:
         # 避免异常的无限回滚
         RB = RollBackManager()
         # 初始化登录信息
-        username, password, course_list, speed, tiku_config = init_config()
+        common_config, tiku_config, notification_config = init_config()
+        username = common_config.get("username","")
+        password = common_config.get("password","")
+        course_list = common_config.get("course_list",None)
+        speed = common_config.get("speed",1)
+        query_delay = tiku_config.get("delay",0)
+        notopen_action = common_config.get("notopen_action", "retry")  # 获取未开放任务点处理方式
         # 规范化播放速度的输入值
         speed = min(2.0, max(1.0, speed))
         if (not username) or (not password):
@@ -127,9 +162,13 @@ if __name__ == "__main__":
         tiku.config_set(tiku_config)  # 载入配置
         tiku = tiku.get_tiku_from_config()  # 载入题库
         tiku.init_tiku()  # 初始化题库
-
+        # 设置外部通知
+        notification = Notification()
+        notification.config_set(notification_config)
+        notification = notification.get_notification_from_config()
+        notification.init_notification()
         # 实例化超星API
-        chaoxing = Chaoxing(account=account, tiku=tiku)
+        chaoxing = Chaoxing(account=account, tiku=tiku,query_delay = query_delay)
         # 检查当前登录状态, 并检查账号密码
         _login_state = chaoxing.login()
         if not _login_state["status"]:
@@ -166,10 +205,16 @@ if __name__ == "__main__":
 
             # 为了支持课程任务回滚, 采用下标方式遍历任务点
             __point_index = 0
+            # 记录用户是否选择继续跳过连续的未开放任务点
+            auto_skip_notopen = False
             while __point_index < len(point_list["points"]):
                 point = point_list["points"][__point_index]
                 logger.info(f'当前章节: {point["title"]}')
                 logger.debug(f"当前章节 __point_index: {__point_index}")  # 触发参数: -v
+                if point["has_finished"]:
+                    logger.info(f'章节：{point["title"]} 已完成所有任务点')
+                    __point_index += 1
+                    continue
                 sleep_duration = random.uniform(1, 3)
                 logger.debug(f"本次随机等待时间: {sleep_duration}")
                 time.sleep(sleep_duration)  # 避免请求过快导致异常, 所以引入随机sleep
@@ -182,26 +227,57 @@ if __name__ == "__main__":
 
                 # bookID = job_info["knowledgeid"] # 获取视频ID
 
-                # 发现未开放章节, 尝试回滚上一个任务重新完成一次
+                # 发现未开放章节, 根据配置处理
                 try:
                     if job_info.get("notOpen", False):
-                        __point_index -= 1  # 默认第一个任务总是开放的
-                        # 针对题库启用情况
-                        if not tiku or tiku.DISABLE or not tiku.SUBMIT:
-                            # 未启用题库或未开启题库提交, 章节检测未完成会导致无法开始下一章, 直接退出
-                            logger.error(
-                                f"章节未开启, 可能由于上一章节的章节检测未完成, 请手动完成并提交再重试, 或者开启题库并启用提交"
-                            )
-                            break
-                        RB.add_times(point["id"])
-                        continue
+                        # 根据配置选择处理方式
+                        if notopen_action == "retry":
+                            # 默认处理方式：重试
+                            __point_index -= 1  # 默认第一个任务总是开放的
+                            # 针对题库启用情况
+                            if not tiku or tiku.DISABLE or not tiku.SUBMIT:
+                                # 未启用题库或未开启题库提交, 章节检测未完成会导致无法开始下一章, 直接退出
+                                logger.error(
+                                    "章节未开启, 可能由于上一章节的章节检测未完成, 也可能由于该章节因为时效已关闭，"
+                                    "请手动检查完成并提交再重试。或者在配置中配置(自动跳过关闭章节/开启题库并启用提交)"
+                                )
+                                break
+                            RB.add_times(point["id"])
+                            continue
+                        elif notopen_action == "ask":
+                            # 询问模式 - 判断是否需要询问
+                            if not auto_skip_notopen:
+                                user_choice = input(f"章节 {point['title']} 未开放，是否继续检查后续章节？(y/n): ")
+                                if user_choice.lower() != 'y':
+                                    # 用户选择停止
+                                    logger.info("根据用户选择停止检查后续章节")
+                                    break
+                                # 用户选择继续，设置自动跳过标志
+                                auto_skip_notopen = True
+                                logger.info("用户选择继续检查后续章节，将自动跳过连续的未开放章节")
+                            else:
+                                logger.info(f"章节 {point['title']} 未开放，自动跳过")
+                            # 无论是否自动跳过，都继续到下一章节
+                            __point_index += 1
+                            continue
+                        else:  # notopen_action == "continue"
+                            # 继续模式，直接跳过当前章节
+                            logger.info(f"章节 {point['title']} 未开放，根据配置跳过此章节")
+                            __point_index += 1
+                            continue
+                    # 遇到开放的章节，重置自动跳过状态
+                    auto_skip_notopen = False
+                    RB.new_job(point["id"])
                 except MaxRollBackError as e:
                     logger.error("回滚次数已达3次, 请手动检查学习通任务点完成情况")
                     # 跳过该课程, 继续下一课程
                     break
-
+                chaoxing.rollback_times = RB.rollback_times
                 # 可能存在章节无任何内容的情况
                 if not jobs:
+                    if RB.rollback_times > 0:
+                        logger.trace(f"回滚中 尝试空页面任务, 任务章节: {course['title']}")
+                        chaoxing.study_emptypage(course, point)
                     __point_index += 1
                     continue
                 # 遍历所有任务点
@@ -219,23 +295,17 @@ if __name__ == "__main__":
                             f"识别到视频任务, 任务章节: {course['title']} 任务ID: {job['jobid']}"
                         )
                         # 超星的接口没有返回当前任务是否为Audio音频任务
-                        isAudio = False
-                        try:
-                            chaoxing.study_video(
-                                course, job, job_info, _speed=speed, _type="Video"
-                            )
-                        except JSONDecodeError as e:
+                        video_result = chaoxing.study_video(
+                            course, job, job_info, _speed=speed, _type="Video"
+                        )
+                        if chaoxing.StudyResult.is_failure(video_result):
                             logger.warning("当前任务非视频任务, 正在尝试音频任务解码")
-                            isAudio = True
-                        if isAudio:
-                            try:
-                                chaoxing.study_video(
-                                    course, job, job_info, _speed=speed, _type="Audio"
-                                )
-                            except JSONDecodeError as e:
-                                logger.warning(
-                                    f"出现异常任务 -> 任务章节: {course['title']} 任务ID: {job['jobid']}, 已跳过"
-                                )
+                            video_result = chaoxing.study_video(
+                                course, job, job_info, _speed=speed, _type="Audio")
+                        if chaoxing.StudyResult.is_failure(video_result):
+                            logger.warning(
+                                f"出现异常任务 -> 任务章节: {course['title']} 任务ID: {job['jobid']}, 已跳过"
+                            )
                     # 文档任务
                     elif job["type"] == "document":
                         logger.trace(
@@ -252,7 +322,7 @@ if __name__ == "__main__":
                         chaoxing.strdy_read(course, job, job_info)
                 __point_index += 1
         logger.info("所有课程学习任务已完成")
-
+        notification.send( "chaoxing : 所有课程学习任务已完成")
     except SystemExit as e:
         if e.code == 0:  # 正常退出
             sys.exit(0)
@@ -260,7 +330,7 @@ if __name__ == "__main__":
             raise
     except BaseException as e:
         import traceback
-
         logger.error(f"错误: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())
+        notification.send(f"chaoxing : 出现错误", f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
         raise e
