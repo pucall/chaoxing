@@ -26,4 +26,4 @@ jobs:
       
       - name: Run main.py
         timeout-minutes: 240
-        run: python main.py -u 19011473320 -p 856923741xxt -l 252119810 #课程id，默认为心理
+        run: python main.py -u 19011473320 -p 856923741xxt -l 252119810 #课程id，默认为心理1
