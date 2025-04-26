@@ -24,5 +24,14 @@ jobs:
           
       
       - name: Run main.py
-        timeout-minutes: 240
-        run: python main.py -u 19011473320 -p 856923741xxt -l 252119810 #课程id，默认为心理
+       run: |
+          while true; do
+            CURRENT_HOUR=$(date +'%H')
+            if [ "$CURRENT_HOUR" -ge 11 ]; 键，然后
+              echo "It is 11 AM. Stopping execution."
+              break
+            fi
+            echo "Running main.py"
+            python main.py -u 19011473320 -p 856923741xxt -l 252119810 # 运行任务逻辑
+            sleep 600 # 等待10分钟再检查时间
+          done
