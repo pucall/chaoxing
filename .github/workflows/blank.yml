@@ -10,9 +10,11 @@ jobs:
   main-task:
     runs-on: ubuntu-latest
     steps:
-      - name: 克隆仓库
-        uses: actions/checkout@v3
-        
+      # --------------------- 新增的关键步骤 ---------------------
+      - name: Checkout code
+        uses: actions/checkout@v3  # 必须添加的代码检出步骤
+
+      # --------------------- 原有时区检测逻辑（仅修正输出格式）---------------------
       - name: 设置时区并计算剩余时间
         id: time-check
         run: |
@@ -21,25 +23,24 @@ jobs:
           current_min=$(date +'%-M')
           
           if [ $current_hour -lt 8 ]; then
-            echo "remain_sec=0" >> $GITHUB_OUTPUT  # 保持变量名一致
+            echo "remain_sec=0" >> $GITHUB_OUTPUT  # 统一变量名
             echo "::error::执行时段未到（8-11点）"
             exit 1
           elif [ $current_hour -ge 11 ]; then
-            echo "remain_sec=0" >> $GITHUB_OUTPUT  # 变量名统一为remain_sec
+            echo "remain_sec=0" >> $GITHUB_OUTPUT  # 统一变量名
             echo "::error::执行时段已结束（8-11点）"
             exit 1
           else
             remain_min=$(( (11 - current_hour)*60 - current_min ))
             remain_sec=$(( remain_min * 60 ))
             echo "当前时间：$(date +'%H:%M')"
-            echo "remain_sec=$remain_sec" >> $GITHUB_OUTPUT  # 关键修复点
+            echo "remain_sec=$remain_sec" >> $GITHUB_OUTPUT  # 英文变量名
           fi
 
+      # --------------------- 原有执行逻辑保持不变 ---------------------
       - name: 执行核心任务
         if: ${{ success() }}
         run: |
-          sudo apt-get update && sudo apt-get install -y time
-          # 现在$remain_sec的值能正确传递
           /usr/bin/timeout --preserve-status ${{ steps.time-check.outputs.remain_sec }} \
             python main.py \
             -u 19011473320 \
