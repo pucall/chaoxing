@@ -26,12 +26,12 @@ jobs:
           if [ $current_hour -lt 8 ]; then
             echo "::error::❌ 当前时间 $(date +'%H:%M')，早于8点禁止执行"
             exit 1
-          elif [ $current_hour -ge 11 ]; then
+          elif [ $current_hour -ge 12 ]; then
             echo "::error::❌ 当前时间 $(date +'%H:%M')，超过11点禁止执行"
             exit 1
           else
             # 计算剩余秒数（正确单位）
-            remain_seconds=$(( (11*60 + 0 - (current_hour*60 + current_min)) *60 )) 
+            remain_seconds=$(( (12*60 + 0 - (current_hour*60 + current_min)) *60 )) 
             echo "剩余执行时间：$((remain_seconds/60)) 分钟"
             echo "remain_seconds=$remain_seconds" >> $GITHUB_OUTPUT
           fi
