@@ -13,40 +13,33 @@ jobs:
       - name: 设置时区并计算剩余时间
         id: time-check
         run: |
-          # 强制设置北京时区
           sudo timedatectl set-timezone Asia/Shanghai
-          
-          # 获取当前时间（24小时制）
           current_hour=$(date +'%-H')
           current_min=$(date +'%-M')
           
-          # 计算到11:00的剩余分钟数
-          if [ $current_hour -lt 8 ]; then       # 早于8点
-            echo "剩余分钟=0" >> $GITHUB_OUTPUT
+          if [ $current_hour -lt 8 ]; then
+            echo "remain_sec=0" >> $GITHUB_OUTPUT  # 保持变量名一致
             echo "::error::执行时段未到（8-11点）"
             exit 1
-          elif [ $current_hour -ge 11 ]; then     # 晚于等于11点
-            echo "剩余分钟=0" >> $GITHUB_OUTPUT
+          elif [ $current_hour -ge 11 ]; then
+            echo "remain_sec=0" >> $GITHUB_OUTPUT  # 变量名统一为remain_sec
             echo "::error::执行时段已结束（8-11点）"
             exit 1
-          else                                    # 在时段内
+          else
             remain_min=$(( (11 - current_hour)*60 - current_min ))
             remain_sec=$(( remain_min * 60 ))
             echo "当前时间：$(date +'%H:%M')"
-            echo "剩余秒数=$remain_sec" >> $GITHUB_OUTPUT
+            echo "remain_sec=$remain_sec" >> $GITHUB_OUTPUT  # 关键修复点
           fi
 
       - name: 执行核心任务
-        if: ${{ success() }}  # 仅当时间检测通过时执行
+        if: ${{ success() }}
         run: |
-          # 安装必要工具
           sudo apt-get update && sudo apt-get install -y time
-          
-          # 带精确时间限制执行（自动终止于11点整）
+          # 现在$remain_sec的值能正确传递
           /usr/bin/timeout --preserve-status ${{ steps.time-check.outputs.remain_sec }} \
             python main.py \
             -u 19011473320 \
             -p 856923741xxt \
             -l 252119810
-
           echo "任务终止时间：$(date +'%H:%M:%S')"
