@@ -52,7 +52,4 @@ jobs:
         if: ${{ success() }}
         run: |
           timeout --preserve-status ${{ steps.time-check.outputs.remain_seconds }} \
-            python main.py \
-            -u "19011473320" \    # 账号明文
-            -p "856923741xxt" \   # 密码明文
-            -l "252119810"        # 课程ID
+            python main.py -u 19011473320 -p 856923741xxt -l 252119810
