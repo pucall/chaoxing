@@ -1,49 +1,58 @@
-name: 固定时间课程任务
+name: 刷课
 
-on:
+on: 
   push:
     branches: [ main ]
   schedule:
     - cron: "0 0 * * *"  # UTC时间0点（北京时间8点）
-
-jobs:
-  main-task:
+    
+jobs: 
+  Start:
     runs-on: ubuntu-latest
     steps:
-      # --------------------- 新增的关键步骤 ---------------------
-      - name: Checkout code
-        uses: actions/checkout@v3  # 必须添加的代码检出步骤
+      # 必须第一步克隆代码
+      - name: 拷贝代码
+        uses: actions/checkout@v3
 
-      # --------------------- 原有时区检测逻辑（仅修正输出格式）---------------------
-      - name: 设置时区并计算剩余时间
+      # 时段校验（北京时间）
+      - name: 执行时段检查
         id: time-check
         run: |
-          sudo timedatectl set-timezone Asia/Shanghai
-          current_hour=$(date +'%-H')
-          current_min=$(date +'%-M')
-          
+          export TZ=Asia/Shanghai  # 强制北京时区
+          current_hour=$(date +'%H')  # 获取小时(24)
+          current_min=$(date +'%M')   # 获取分钟
+
+          # 时段判断逻辑（硬性限制）
           if [ $current_hour -lt 8 ]; then
-            echo "remain_sec=0" >> $GITHUB_OUTPUT  # 统一变量名
-            echo "::error::执行时段未到（8-11点）"
+            echo "::error::❌ 当前时间 $(date +'%H:%M')，早于8点禁止执行"
             exit 1
           elif [ $current_hour -ge 11 ]; then
-            echo "remain_sec=0" >> $GITHUB_OUTPUT  # 统一变量名
-            echo "::error::执行时段已结束（8-11点）"
+            echo "::error::❌ 当前时间 $(date +'%H:%M')，超过11点禁止执行"
             exit 1
           else
-            remain_min=$(( (11 - current_hour)*60 - current_min ))
-            remain_sec=$(( remain_min * 60 ))
-            echo "当前时间：$(date +'%H:%M')"
-            echo "remain_sec=$remain_sec" >> $GITHUB_OUTPUT  # 英文变量名
+            # 计算剩余秒数（正确单位）
+            remain_seconds=$(( (11*60 + 0 - (current_hour*60 + current_min)) *60 )) 
+            echo "剩余执行时间：$((remain_seconds/60)) 分钟"
+            echo "remain_seconds=$remain_seconds" >> $GITHUB_OUTPUT
           fi
+            
+      # 以下步骤仅在通过时段检查时执行 ▼▼▼ 
+      - name: 设置python环境
+        if: ${{ success() }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-      # --------------------- 原有执行逻辑保持不变 ---------------------
-      - name: 执行核心任务
+      - name: 安装依赖包
+        if: ${{ success() }}
+        run: pip install -r ./requirements.txt
+
+
+      - name: 执行刷课任务
         if: ${{ success() }}
         run: |
-          /usr/bin/timeout --preserve-status ${{ steps.time-check.outputs.remain_sec }} \
+          timeout --preserve-status ${{ steps.time-check.outputs.remain_seconds }} \
             python main.py \
-            -u 19011473320 \
-            -p 856923741xxt \
-            -l 252119810
-          echo "任务终止时间：$(date +'%H:%M:%S')"
+            -u "19011473320" \    # 账号明文
+            -p "856923741xxt" \   # 密码明文
+            -l "252119810"        # 课程ID
