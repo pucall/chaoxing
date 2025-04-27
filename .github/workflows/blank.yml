@@ -10,6 +10,9 @@ jobs:
   main-task:
     runs-on: ubuntu-latest
     steps:
+      - name: 克隆仓库
+        uses: actions/checkout@v3
+        
       - name: 设置时区并计算剩余时间
         id: time-check
         run: |
