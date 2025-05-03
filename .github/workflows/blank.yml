@@ -52,4 +52,4 @@ jobs:
         if: ${{ success() }}
         run: |
           timeout --preserve-status ${{ steps.time-check.outputs.remain_seconds }} \
-            python main.py -u 18327173896 -p asdfghjkl321 -l 249788573
+            python main.py -u 18327173896 -p Asdfghjkl1 -l 249788573
