@@ -52,4 +52,4 @@ jobs:
         if: ${{ success() }}
         run: |
           timeout --preserve-status ${{ steps.time-check.outputs.remain_seconds }} \
-            python main.py -u 13636130227 -p deng20060802 -l 252119813
+            python main.py -c config.ini
