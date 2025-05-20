@@ -1,46 +1,55 @@
-name: CI
+name: 刷课
 
-on:
+on: 
   push:
-
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            architecture: 'x86'
-            name: 'win32'
-
+    branches: [ main ]
+  schedule:
+    - cron: "0 0 * * *"  # UTC时间0点（北京时间8点）
+    
+jobs: 
+  Start:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v3
-        with:
-          python-version: '3.10'
-          architecture: ${{matrix.architecture}}
+      # 必须第一步克隆代码
+      - name: 拷贝代码
+        uses: actions/checkout@v3
 
-      - name: Install requirements
+      # 时段校验（北京时间）
+      - name: 执行时段检查
+        id: time-check
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
+          export TZ=Asia/Shanghai
+          current_hour=$(date +'%-H')  # 重要！
+          current_min=$(date +'%-M')   # 重要！
+          
+          if [ $current_hour -lt 8 ]; then
+            echo "::error::❌ 当前北京时间 $(date +'%H:%M')，早间窗口未开启"
+            exit 1
+          elif [ $current_hour -ge 12 ]; then
+            echo "::error::❌ 当前北京时间 $(date +'%H:%M')，午间窗口已关闭"
+            exit 1
+          else
+            remain_minutes=$(( 12*60 - (current_hour*60 + current_min) ))
+            remain_seconds=$(( remain_minutes * 60 ))
+            echo "剩余有效时长：${remain_minutes}分（${remain_seconds}秒）"  
+            echo "remain_seconds=$remain_seconds" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Build win bin
-        run: pyinstaller -F main.py -n 'chaoxing' --add-data "resource;resource"
-
-      - name: Create release package
-        run: |
-          mkdir release
-          copy dist\chaoxing.exe release\
-          copy config_template.ini release\
-          cd release
-          7z a -tzip chaoxing.zip *
-
-      - uses: actions/upload-artifact@v4
+            
+      # 以下步骤仅在通过时段检查时执行 ▼▼▼ 
+      - name: 设置python环境
+        if: ${{ success() }}
+        uses: actions/setup-python@v4
         with:
-          name: ${{ matrix.name }}
-          path: 'release/chaoxing.zip'
+          python-version: '3.9'
+
+      - name: 安装依赖包
+        if: ${{ success() }}
+        run: pip install -r ./requirements.txt
+
+
+      - name: 执行刷课任务
+        if: ${{ success() }}
+        run: |
+          timeout --preserve-status ${{ steps.time-check.outputs.remain_seconds }} \
+            python main.py -c config.ini
