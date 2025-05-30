@@ -36,20 +36,12 @@ jobs:
           fi
 
             
-      # 以下步骤仅在通过时段检查时执行 ▼▼▼ 
-      - name: 设置python环境
-        if: ${{ success() }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
-      - name: 安装依赖包
-        if: ${{ success() }}
-        run: pip install -r ./requirements.txt
-
-
       - name: 执行刷课任务
         if: ${{ success() }}
+        env:
+          ACCOUNT_USR: ${{ secrets.USR }}
+          ACCOUNT_PSW: ${{ secrets.PSW }}
+          COURSE_LEESON: ${{ vars.LEESON }}
         run: |
           timeout --preserve-status ${{ steps.time-check.outputs.remain_seconds }} \
-            python main.py -u "$USR" -p "$PSW" -l "$LEESON" -a continue
+            python main.py -u "$ACCOUNT_USR" -p "$ACCOUNT_PSW" -l "$COURSE_LEESON" -a continue
