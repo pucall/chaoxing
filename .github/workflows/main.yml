@@ -84,12 +84,12 @@ jobs:
           ACCOUNT_PSW: ${{ secrets.PSW }}
           # 从 GitHub Variables 中获取非敏感配置信息
           # 请确保你在仓库设置中配置了 LEESON 这个 Variable
-          COURSE_LEESON: ${{ vars.LEESON }} 
+          COURSE_LESSON: ${{ vars.LESSON }} 
         run: |
           echo "开始执行 main.py 脚本..."
           # 使用 timeout_prefix 变量来动态决定是否使用 timeout 命令及其参数
           # 如果是手动触发，timeout_prefix 为空，则不会执行 timeout 命令
           # 如果是定时或push触发，timeout_prefix 包含 timeout 命令和剩余秒数
           ${{ steps.time-check.outputs.timeout_prefix }} \
-            python main.py -u "$ACCOUNT_USR" -p "$ACCOUNT_PSW" -l "$COURSE_LEESON" -a continue
+            python main.py -u "$ACCOUNT_USR" -p "$ACCOUNT_PSW" -l "$COURSE_LESSON" -a continue
           echo "main.py 脚本执行完毕或因超时而终止。"
