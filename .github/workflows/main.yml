@@ -63,7 +63,7 @@ jobs:
         with:
           # 指定 Python 版本。建议使用一个具体的稳定版本，如 '3.9'、'3.10' 或 '3.11'
           # 请根据你的 main.py 代码兼容性选择一个合适的版本
-          python-version: '3.9' 
+          python-version: '3.12' 
 
       - name: 📦 安装 Python 依赖 (Install Python dependencies)
         # 这是解决 ModuleNotFoundError 的关键步骤
