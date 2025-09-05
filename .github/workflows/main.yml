@@ -1,6 +1,6 @@
 name: 刷课任务自动化 # 更清晰的工作流名称
 
-# on:
+于:
   push:
     branches: [ main ] # 当推送到 main 分支时触发
   schedule:
@@ -9,7 +9,7 @@ name: 刷课任务自动化 # 更清晰的工作流名称
     - cron: "0 0 * * *"
   workflow_dispatch: # 允许在 GitHub UI 上手动触发此工作流
 
-# jobs:
+jobs:
   Start:
     runs-on: ubuntu-latest # 使用最新的 Ubuntu runner
 
