@@ -1,6 +1,6 @@
 name: 刷课任务自动化 # 更清晰的工作流名称
 
-于:
+on:
   push:
     branches: [ main ] # 当推送到 main 分支时触发
   schedule:
