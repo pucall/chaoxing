@@ -8,7 +8,7 @@ import time
 import traceback
 from concurrent.futures.thread import ThreadPoolExecutor
 from dataclasses import dataclass
-from queue import PriorityQueue, ShutDown
+from queue import PriorityQueue, Empty
 from threading import RLock
 from typing import Any
 
@@ -188,39 +188,37 @@ def init_chaoxing(common_config, tiku_config):
     return chaoxing
 
 
-def process_job(chaoxing: Chaoxing, course:dict, job:dict, job_info:dict, speed:float) -> StudyResult:
-    """处理单个任务点"""
-    # 视频任务
-    if job["type"] == "video":
-        logger.trace(f"识别到视频任务, 任务章节: {course['title']} 任务ID: {job['jobid']}")
-        # 超星的接口没有返回当前任务是否为Audio音频任务
-        video_result = chaoxing.study_video(
-            course, job, job_info, _speed=speed, _type="Video"
-        )
-        if video_result.is_failure():
-            logger.warning("当前任务非视频任务, 正在尝试音频任务解码")
-            video_result = chaoxing.study_video(
-                course, job, job_info, _speed=speed, _type="Audio")
-        if video_result.is_failure():
-            logger.warning(
-                f"出现异常任务 -> 任务章节: {course['title']} 任务ID: {job['jobid']}, 已跳过"
-            )
-        return video_result
-    # 文档任务
-    elif job["type"] == "document":
-        logger.trace(f"识别到文档任务, 任务章节: {course['title']} 任务ID: {job['jobid']}")
-        return chaoxing.study_document(course, job)
-    # 测验任务
-    elif job["type"] == "workid":
-        logger.trace(f"识别到章节检测任务, 任务章节: {course['title']}")
-        return chaoxing.study_work(course, job, job_info)
-    # 阅读任务
-    elif job["type"] == "read":
-        logger.trace(f"识别到阅读任务, 任务章节: {course['title']}")
-        return chaoxing.study_read(course, job, job_info)
+@log_error
+def worker_thread(self):
+    while True:
+        try:
+            task = self.task_queue.get(timeout=1)  # 添加超时
+            if task is _SHUTDOWN_SENTINEL:
+                logger.info("Worker task done")
+                return
+            
+            # 处理任务...
+            self.task_queue.task_done()
+            
+        except Empty:
+            if self.should_shutdown:
+                logger.info("Worker thread shutting down")
+                return
 
-    logger.error("Unknown job type: %s", job["type"])
-    return StudyResult.ERROR
+def run(self):
+    # 启动工作线程...
+    for i in range(self.workers):
+        thread = threading.Thread(target=self.worker_thread, daemon=True)
+        self.threads.append(thread)
+        thread.start()
+    
+    # 等待所有任务完成
+    self.task_queue.join()
+    
+    # 通知工作线程关闭（使用哨兵值）
+    self.should_shutdown = True
+    for i in range(self.workers):
+        self.task_queue.put(_SHUTDOWN_SENTINEL)
 
 
 @dataclass(order=True)
