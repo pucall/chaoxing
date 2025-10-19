@@ -1,95 +1,115 @@
-name: 刷课任务自动化 # 更清晰的工作流名称
+name: 刷课任务自动化
 
 on:
   push:
-    branches: [ main ] # 当推送到 main 分支时触发
+    branches: [ main ]
   schedule:
-    # cron 表达式为 UTC 时间。
-    # "0 0 * * *" 表示 UTC 0点0分，这对应北京时间 (UTC+8) 的早上 8点0分。
     - cron: "0 0 * * *"
-  workflow_dispatch: # 允许在 GitHub UI 上手动触发此工作流
+  workflow_dispatch:
+
+env:
+  # 定义观看时长变量（分钟）
+  # 自动触发：0=到12点，>0=指定分钟数
+  # 手动触发：0=4小时，>0=指定分钟数
+  WATCH_DURATION_MINUTES: ${{ vars.WATCH_DURATION || 0 }}
 
 jobs:
   Start:
-    runs-on: ubuntu-latest # 使用最新的 Ubuntu runner
+    runs-on: ubuntu-latest
 
     steps:
-      - name: 🚀 拷贝代码 (Checkout repository)
-        # 推荐使用 actions/checkout@v4，以获取最新功能和安全修复
+      - name: 🚀 拷贝代码
         uses: actions/checkout@v4
 
-      - name: ⏰ 执行时段检查 (Perform time check - Beijing Time)
-        id: time-check # 为此步骤设置 ID，以便获取其输出
+      - name: ⏰ 执行时段检查
+        id: time-check
+        env:
+          WATCH_DURATION: ${{ env.WATCH_DURATION_MINUTES }}
         run: |
           echo "触发事件名称: $GITHUB_EVENT_NAME"
+          echo "设置的观看时长: ${WATCH_DURATION} 分钟"
 
           if [ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]; then
-              # 如果是手动触发，跳过脚本层面的时间限制。
-              # 这里我们设置 timeout_prefix 为空，意味着在执行命令时不会使用 timeout 命令。
-              echo "手动触发，任务将不受脚本内时间限制。"
-              echo "timeout_prefix=" >> "$GITHUB_OUTPUT" 
+              # 手动触发逻辑
+              if [ "${WATCH_DURATION}" -eq 0 ]; then
+                  # 手动触发 + 时长为0 = 4小时
+                  timeout_seconds=$(( 4 * 60 * 60 ))
+                  echo "手动触发，默认观看时长: 4小时 (${timeout_seconds}秒)"
+                  echo "timeout_prefix=timeout --preserve-status $timeout_seconds" >> "$GITHUB_OUTPUT"
+              else
+                  # 手动触发 + 时长>0 = 指定分钟
+                  timeout_seconds=$(( WATCH_DURATION * 60 ))
+                  echo "手动触发，自定义观看时长: ${WATCH_DURATION} 分钟"
+                  echo "timeout_prefix=timeout --preserve-status $timeout_seconds" >> "$GITHUB_OUTPUT"
+              fi
           else
-              # 对于 push 或 schedule 触发，执行时间窗口校验
-              export TZ=Asia/Shanghai # 设置时区为北京时间，确保时间校验的准确性
-              current_hour=$(date +'%-H') # 获取当前小时（不带前导零）
-              current_min=$(date +'%-M')  # 获取当前分钟（不带前导零）
+              # 自动触发逻辑（schedule/push）
+              export TZ=Asia/Shanghai
+              current_hour=$(date +'%-H')
+              current_min=$(date +'%-M')
               
               echo "当前北京时间: $(date +'%H:%M')"
 
               # 校验是否在 08:00 到 11:59 的有效窗口内
               if [ "$current_hour" -lt 8 ]; then
                 echo "::error::❌ 当前北京时间 $(date +'%H:%M')，早间窗口未开启 (需 >= 08:00)"
-                exit 1 # 退出工作流
+                exit 1
               elif [ "$current_hour" -ge 12 ]; then
                 echo "::error::❌ 当前北京时间 $(date +'%H:%M')，午间窗口已关闭 (需 < 12:00)"
-                exit 1 # 退出工作流
+                exit 1
               else
                 # 计算到 12:00 整的剩余秒数
-                target_minutes_of_day=$(( 12 * 60 )) # 12点整转换为分钟数
-                current_minutes_of_day=$(( current_hour * 60 + current_min )) # 当前时间转换为分钟数
+                target_minutes_of_day=$(( 12 * 60 ))
+                current_minutes_of_day=$(( current_hour * 60 + current_min ))
                 
-                remain_minutes=$(( target_minutes_of_day - current_minutes_of_day )) # 剩余分钟数
-                remain_seconds=$(( remain_minutes * 60 )) # 剩余秒数
+                remain_minutes=$(( target_minutes_of_day - current_minutes_of_day ))
+                remain_seconds=$(( remain_minutes * 60 ))
                 
-                echo "✅ 时段检查通过。剩余有效时长：${remain_minutes}分（${remain_seconds}秒）"
-                # 将 timeout 命令的前缀作为 Job Output，供后续步骤使用
-                echo "timeout_prefix=timeout --preserve-status $remain_seconds" >> "$GITHUB_OUTPUT"
+                if [ "${WATCH_DURATION}" -eq 0 ]; then
+                  # 自动触发 + 时长为0 = 到12点
+                  final_seconds=$remain_seconds
+                  final_minutes=$remain_minutes
+                  echo "✅ 自动触发，使用默认时长到12点: ${final_minutes} 分钟"
+                else
+                  # 自动触发 + 时长>0 = 指定分钟（不能超过12点）
+                  custom_seconds=$(( WATCH_DURATION * 60 ))
+                  if [ "$custom_seconds" -lt "$remain_seconds" ]; then
+                    final_seconds=$custom_seconds
+                    final_minutes=$WATCH_DURATION
+                    echo "✅ 自动触发，使用自定义观看时长: ${final_minutes} 分钟"
+                  else
+                    final_seconds=$remain_seconds
+                    final_minutes=$remain_minutes
+                    echo "✅ 自动触发，自定义时长超过窗口限制，使用剩余窗口时长: ${final_minutes} 分钟"
+                  fi
+                fi
+                
+                echo "最终执行时长：${final_minutes}分（${final_seconds}秒）"
+                echo "timeout_prefix=timeout --preserve-status $final_seconds" >> "$GITHUB_OUTPUT"
               fi
           fi
 
-      - name: 🐍 设置 Python 环境 (Set up Python environment)
-        # 这是解决 ModuleNotFoundError 的第一步
+      - name: 🐍 设置 Python 环境
         uses: actions/setup-python@v5
         with:
-          # 指定 Python 版本。建议使用一个具体的稳定版本，如 '3.9'、'3.10' 或 '3.11'
-          # 请根据你的 main.py 代码兼容性选择一个合适的版本
-          python-version: '3.12' 
+          python-version: '3.12'
 
-      - name: 📦 安装 Python 依赖 (Install Python dependencies)
-        # 这是解决 ModuleNotFoundError 的关键步骤
+      - name: 📦 安装 Python 依赖
         run: |
           echo "正在升级 pip 工具自身..."
-          python -m pip install --upgrade pip # 升级 pip，确保其为最新版本
+          python -m pip install --upgrade pip
           echo "正在安装 requirements.txt 中列出的依赖..."
-          pip install -r requirements.txt # 安装所有项目依赖
+          pip install -r requirements.txt
           echo "所有依赖安装完成。"
 
-      - name: 🚀 执行刷课任务 (Run main script)
-        # 'if: ${{ success() }}' 确保只有当前面所有步骤都成功时才执行此任务
+      - name: 🚀 执行刷课任务
         if: ${{ success() }}
         env:
-          # 从 GitHub Secrets 中安全地获取敏感信息
-          # 请确保你在仓库设置中配置了 USR 和 PSW 两个 Secret
-          ACCOUNT_USR: ${{ secrets.USR }} 
+          ACCOUNT_USR: ${{ secrets.USR }}
           ACCOUNT_PSW: ${{ secrets.PSW }}
-          # 从 GitHub Variables 中获取非敏感配置信息
-          # 请确保你在仓库设置中配置了 LEESON 这个 Variable
-          COURSE_LESSON: ${{ vars.LESSON }} 
+          COURSE_LESSON: ${{ vars.LESSON }}
         run: |
           echo "开始执行 main.py 脚本..."
-          # 使用 timeout_prefix 变量来动态决定是否使用 timeout 命令及其参数
-          # 如果是手动触发，timeout_prefix 为空，则不会执行 timeout 命令
-          # 如果是定时或push触发，timeout_prefix 包含 timeout 命令和剩余秒数
           ${{ steps.time-check.outputs.timeout_prefix }} \
             python main.py -u "$ACCOUNT_USR" -p "$ACCOUNT_PSW" -l "$COURSE_LESSON" -a continue
           echo "main.py 脚本执行完毕或因超时而终止。"
