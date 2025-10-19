@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
   schedule:
+    # 每天北京时间早上8点自动执行
     - cron: "0 0 * * *"
   workflow_dispatch:
 
@@ -21,7 +22,7 @@ jobs:
       - name: 🚀 拷贝代码
         uses: actions/checkout@v4
 
-      - name: ⏰ 执行时段检查
+      - name: ⏰ 计算执行时长
         id: time-check
         env:
           WATCH_DURATION: ${{ env.WATCH_DURATION_MINUTES }}
@@ -32,18 +33,14 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]; then
               # 手动触发逻辑
               if [ "${WATCH_DURATION}" -eq 0 ]; then
-                  # 手动触发 + 时长为0 = 4小时
                   timeout_seconds=$(( 4 * 60 * 60 ))
-                  echo "手动触发，默认观看时长: 4小时 (${timeout_seconds}秒)"
-                  echo "timeout_prefix=timeout --preserve-status $timeout_seconds" >> "$GITHUB_OUTPUT"
+                  echo "手动触发，默认运行时长: 4小时 (${timeout_seconds}秒)"
               else
-                  # 手动触发 + 时长>0 = 指定分钟
                   timeout_seconds=$(( WATCH_DURATION * 60 ))
-                  echo "手动触发，自定义观看时长: ${WATCH_DURATION} 分钟"
-                  echo "timeout_prefix=timeout --preserve-status $timeout_seconds" >> "$GITHUB_OUTPUT"
+                  echo "手动触发，自定义运行时长: ${WATCH_DURATION} 分钟"
               fi
           else
-              # 自动触发逻辑（schedule/push）
+              # 自动触发逻辑 (schedule/push)
               export TZ=Asia/Shanghai
               current_hour=$(date +'%-H')
               current_min=$(date +'%-M')
@@ -51,43 +48,38 @@ jobs:
               echo "当前北京时间: $(date +'%H:%M')"
 
               # 校验是否在 08:00 到 11:59 的有效窗口内
-              if [ "$current_hour" -lt 8 ]; then
-                echo "::error::❌ 当前北京时间 $(date +'%H:%M')，早间窗口未开启 (需 >= 08:00)"
+              if [ "$current_hour" -lt 8 ] || [ "$current_hour" -ge 12 ]; then
+                echo "::error::❌ 当前时间不在 08:00 - 11:59 的早间自动执行窗口内，任务取消。"
                 exit 1
-              elif [ "$current_hour" -ge 12 ]; then
-                echo "::error::❌ 当前北京时间 $(date +'%H:%M')，午间窗口已关闭 (需 < 12:00)"
-                exit 1
+              fi
+              
+              # 计算到 12:00 整的剩余秒数
+              target_minutes_of_day=$(( 12 * 60 ))
+              current_minutes_of_day=$(( current_hour * 60 + current_min ))
+              remain_minutes=$(( target_minutes_of_day - current_minutes_of_day ))
+              remain_seconds=$(( remain_minutes * 60 ))
+              
+              if [ "${WATCH_DURATION}" -eq 0 ]; then
+                final_seconds=$remain_seconds
+                final_minutes=$remain_minutes
+                echo "✅ 自动触发，运行时长将持续到12点: ${final_minutes} 分钟"
               else
-                # 计算到 12:00 整的剩余秒数
-                target_minutes_of_day=$(( 12 * 60 ))
-                current_minutes_of_day=$(( current_hour * 60 + current_min ))
-                
-                remain_minutes=$(( target_minutes_of_day - current_minutes_of_day ))
-                remain_seconds=$(( remain_minutes * 60 ))
-                
-                if [ "${WATCH_DURATION}" -eq 0 ]; then
-                  # 自动触发 + 时长为0 = 到12点
+                custom_seconds=$(( WATCH_DURATION * 60 ))
+                if [ "$custom_seconds" -lt "$remain_seconds" ]; then
+                  final_seconds=$custom_seconds
+                  final_minutes=$WATCH_DURATION
+                  echo "✅ 自动触发，使用自定义时长: ${final_minutes} 分钟"
+                else
                   final_seconds=$remain_seconds
                   final_minutes=$remain_minutes
-                  echo "✅ 自动触发，使用默认时长到12点: ${final_minutes} 分钟"
-                else
-                  # 自动触发 + 时长>0 = 指定分钟（不能超过12点）
-                  custom_seconds=$(( WATCH_DURATION * 60 ))
-                  if [ "$custom_seconds" -lt "$remain_seconds" ]; then
-                    final_seconds=$custom_seconds
-                    final_minutes=$WATCH_DURATION
-                    echo "✅ 自动触发，使用自定义观看时长: ${final_minutes} 分钟"
-                  else
-                    final_seconds=$remain_seconds
-                    final_minutes=$remain_minutes
-                    echo "✅ 自动触发，自定义时长超过窗口限制，使用剩余窗口时长: ${final_minutes} 分钟"
-                  fi
+                  echo "✅ 自动触发，自定义时长超过窗口限制，使用剩余窗口时长: ${final_minutes} 分钟"
                 fi
-                
-                echo "最终执行时长：${final_minutes}分（${final_seconds}秒）"
-                echo "timeout_prefix=timeout --preserve-status $final_seconds" >> "$GITHUB_OUTPUT"
               fi
+              timeout_seconds=$final_seconds
           fi
+          
+          echo "最终执行时长：$((timeout_seconds / 60))分（${timeout_seconds}秒）"
+          echo "timeout_prefix=timeout --preserve-status $timeout_seconds" >> "$GITHUB_OUTPUT"
 
       - name: 🐍 设置 Python 环境
         uses: actions/setup-python@v5
@@ -96,20 +88,44 @@ jobs:
 
       - name: 📦 安装 Python 依赖
         run: |
-          echo "正在升级 pip 工具自身..."
           python -m pip install --upgrade pip
-          echo "正在安装 requirements.txt 中列出的依赖..."
-          pip install -r requirements.txt
-          echo "所有依赖安装完成。"
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "::warning::未找到 requirements.txt 文件，跳过依赖安装。"
+          fi
 
       - name: 🚀 执行刷课任务
+        # 只有在前面的步骤都成功时才执行
         if: ${{ success() }}
         env:
+          # 从 Secrets 和 Vars 读取配置
           ACCOUNT_USR: ${{ secrets.USR }}
           ACCOUNT_PSW: ${{ secrets.PSW }}
           COURSE_LESSON: ${{ vars.LESSON }}
+          # 读取你在仓库中设置的并发数变量，如果没设置，默认为 0
+          CONCURRENT_JOBS: ${{ vars.CONCURRENT_JOBS || 0 }}
         run: |
           echo "开始执行 main.py 脚本..."
+
+          # --- 新增的核心逻辑 ---
+          # 根据 CONCURRENT_JOBS 变量来构建 -j 参数
+          JOBS_ARG=""
+          if [ "$CONCURRENT_JOBS" -ne 0 ]; then
+            echo "检测到自定义并发数: $CONCURRENT_JOBS，将使用 '-j $CONCURRENT_JOBS' 参数。"
+            JOBS_ARG="-j $CONCURRENT_JOBS"
+          else
+            echo "使用脚本内置的默认并发数 (4)。"
+          fi
+          # --- 核心逻辑结束 ---
+
+          # 执行带有完整参数的命令
           ${{ steps.time-check.outputs.timeout_prefix }} \
-            python main.py -u "$ACCOUNT_USR" -p "$ACCOUNT_PSW" -l "$COURSE_LESSON" -a continue
+            python main.py \
+              -u "$ACCOUNT_USR" \
+              -p "$ACCOUNT_PSW" \
+              -l "$COURSE_LESSON" \
+              -a continue \
+              $JOBS_ARG
+
           echo "main.py 脚本执行完毕或因超时而终止。"
