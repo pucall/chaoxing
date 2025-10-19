@@ -7,7 +7,7 @@ import threading
 import time
 import traceback
 from concurrent.futures.thread import ThreadPoolExecutor
-from dataclasses import dataclass, field  # <--- 修改点 1
+from dataclasses import dataclass, field
 from queue import PriorityQueue, Empty
 from threading import RLock
 from typing import Any, Union
@@ -229,7 +229,7 @@ def process_chapter(chaoxing: Chaoxing, course: dict, point: dict, speed: float)
 class ChapterTask:
     """用于在优先队列中排序的章节任务对象"""
     index: int
-    point: Any = field(compare=False) # <--- 修改点 2
+    point: Any = field(compare=False)
     result: ChapterResult = ChapterResult.PENDING
     tries: int = 0
 
@@ -241,6 +241,7 @@ class JobProcessor:
         self.course = course
         self.speed = config["speed"]
         self.max_tries = 5
+        self.tasks = tasks
         self.failed_tasks: list[ChapterTask] = []
         self.task_queue: PriorityQueue[Union[ChapterTask, None]] = PriorityQueue()
         self.retry_queue: PriorityQueue[Union[ChapterTask, None]] = PriorityQueue()
@@ -261,7 +262,7 @@ class JobProcessor:
             thread.start()
 
         # 将所有初始任务放入队列
-        for task in tasks:
+        for task in self.tasks:  # <--- 修正点
             self.task_queue.put(task)
 
         # 等待所有任务被处理（task_done被调用）
@@ -288,6 +289,8 @@ class JobProcessor:
                 continue # 队列空，继续循环检查是否需要关闭
 
             try:
+                if task is None: # 额外的安全检查
+                    continue
                 task.result = process_chapter(self.chaoxing, self.course, task.point, self.speed)
 
                 if task.result == ChapterResult.SUCCESS:
@@ -349,11 +352,18 @@ def process_course(chaoxing: Chaoxing, course: dict, config: dict):
         # 创建一个回调函数来更新进度条
         original_task_done = PriorityQueue.task_done
         
+        # 定义一个计数器来跟踪已完成的任务
+        completed_tasks = 0
+        total_tasks = len(tasks)
+
         def new_task_done(self):
+            nonlocal completed_tasks
             with pbar_lock:
-                # 只有当任务被真正消耗时才更新 (防止重试任务导致进度条超额)
-                # 这个逻辑有点复杂，简化为每次都更新，但要保证线程安全
-                pbar.update(1)
+                # 只有当任务是初次完成时才更新进度条
+                current_completed = total_tasks - self.unfinished_tasks
+                if current_completed > completed_tasks:
+                     pbar.update(current_completed - completed_tasks)
+                     completed_tasks = current_completed
             original_task_done(self)
         
         # 猴子补丁：临时替换 task_done 方法以更新进度条
@@ -361,6 +371,10 @@ def process_course(chaoxing: Chaoxing, course: dict, config: dict):
         
         processor = JobProcessor(chaoxing, course, tasks, config)
         processor.run()
+
+        # 确保进度条在最后达到100%
+        if pbar.n < total_tasks:
+            pbar.update(total_tasks - pbar.n)
 
         # 恢复原始方法
         PriorityQueue.task_done = original_task_done
