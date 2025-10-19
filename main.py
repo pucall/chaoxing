@@ -7,7 +7,7 @@ import threading
 import time
 import traceback
 from concurrent.futures.thread import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field  # <--- 修改点 1
 from queue import PriorityQueue, Empty
 from threading import RLock
 from typing import Any, Union
@@ -229,7 +229,7 @@ def process_chapter(chaoxing: Chaoxing, course: dict, point: dict, speed: float)
 class ChapterTask:
     """用于在优先队列中排序的章节任务对象"""
     index: int
-    point: Any = dataclasses.field(compare=False)
+    point: Any = field(compare=False) # <--- 修改点 2
     result: ChapterResult = ChapterResult.PENDING
     tries: int = 0
 
@@ -341,12 +341,19 @@ def process_course(chaoxing: Chaoxing, course: dict, config: dict):
         return
 
     # 使用 tqdm 创建进度条
-    with tqdm(total=len(tasks), desc=f"学习课程: {course['title']}") as pbar:
+    with tqdm(total=len(tasks), desc=f"学习课程: {course['title']}", unit="章") as pbar:
+        
+        # 为了让进度条在多线程环境下正确更新，我们需要一个锁
+        pbar_lock = threading.Lock()
+
         # 创建一个回调函数来更新进度条
         original_task_done = PriorityQueue.task_done
+        
         def new_task_done(self):
-            if self.qsize() < pbar.total: # 只有当任务被真正消耗时才更新
-                 pbar.update(1)
+            with pbar_lock:
+                # 只有当任务被真正消耗时才更新 (防止重试任务导致进度条超额)
+                # 这个逻辑有点复杂，简化为每次都更新，但要保证线程安全
+                pbar.update(1)
             original_task_done(self)
         
         # 猴子补丁：临时替换 task_done 方法以更新进度条
